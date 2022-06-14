@@ -1,0 +1,170 @@
+Description: Imama Igein Udacity Week2 Project Submission Mon 13th June 22:49 for Server specification 
+
+Parameters:
+
+    EnvironmentName:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+
+    MyInstanceType:
+        Description: Ubuntu 18 Operating system Type
+        Type: String
+        Default: t3.small
+
+    MyImageId:
+        Description: An environment name that will be prefixed to resource names
+        Type: String
+        Default: ami-09d56f8956ab235b3
+
+Resources:
+    # create an IAM Role that allows your instances to use the S3 Service.
+    RootInstanceProfile:
+        Type: 'AWS::IAM::InstanceProfile'
+        Properties:
+          Path: /
+          Roles:
+            - !Ref UdagramS3Root
+    
+    UdagramS3Root:
+        Type: AWS::IAM::Role
+        Properties:
+            AssumeRolePolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                    - Effect: Allow
+                      Principal:
+                          Service:
+                              - ec2.amazonaws.com
+                      Action:
+                          - 'sts:AssumeRole'
+            Path: /
+            Policies:
+                - PolicyName: UdagramS3Root
+                  PolicyDocument:
+                      Version: "2012-10-17"
+                      Statement:
+                        - Effect: Allow
+                          Action: '*'
+                          Resource: '*'
+
+    UdagramSecurityGroup:
+        Type: AWS::EC2::SecurityGroup
+        Properties:
+            GroupDescription: Instance security group
+            VpcId:
+                Fn::ImportValue: !Sub ${EnvironmentName}-VPC
+            SecurityGroupIngress:
+                - IpProtocol: tcp
+                  FromPort: 80
+                  ToPort: 80
+                  CidrIp: 0.0.0.0/0
+                - IpProtocol: tcp
+                  FromPort: 22
+                  ToPort: 22
+                  CidrIp: 0.0.0.0/0
+
+    UdagramLBSecGroup:
+          Type: AWS::EC2::SecurityGroup
+          Properties:
+            GroupDescription: Allow http to our load balancer
+            VpcId:
+              Fn::ImportValue:
+                !Sub "${EnvironmentName}-VPC"
+            SecurityGroupIngress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+            SecurityGroupEgress:
+            - IpProtocol: tcp
+              FromPort: 80
+              ToPort: 80
+              CidrIp: 0.0.0.0/0
+
+    UdagramWebAppLaunchConfig:
+          Type: AWS::AutoScaling::LaunchConfiguration
+          Properties:
+            UserData:
+              Fn::Base64: !Sub |
+               #!/bin/bash
+               apt-get update -y
+               apt-get install apache2 -y
+               systemctl start apache2.service
+               cd /var/www/html
+               echo "Udacity Demo Web Server Up and Running!" > index.html 
+               sudo bash
+               aws s3 cp s3://udagram24061992/Udagram/index.html /var/www/html
+
+            # ToDo: AMI ID of Ubuntu Linux machine. Too get one, try creating a VM from the web console. 
+            ImageId: !Ref MyImageId
+            # ToDo: Change the key-pair name, as applicable to you. 
+            KeyName: nd9990_keypair
+            SecurityGroups:
+            - Ref: UdagramSecurityGroup
+            InstanceType: !Ref MyInstanceType
+            BlockDeviceMappings:
+            - DeviceName: "/dev/sdk"
+              Ebs:
+                VolumeSize: '10'
+
+    UdagramWebAppGroup:
+          Type: AWS::AutoScaling::AutoScalingGroup
+          Properties:
+            VPCZoneIdentifier:
+            - Fn::ImportValue: 
+                !Sub "${EnvironmentName}-PRIV-NETS"
+            LaunchConfigurationName:
+              Ref: UdagramWebAppLaunchConfig
+            MinSize: '4'
+            MaxSize: '4'
+            TargetGroupARNs:
+            - Ref: UdagramWebAppTargetGroup
+
+    UdagramWebAppLB:
+            Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+            Properties:
+              Subnets:
+              - Fn::ImportValue: !Sub "${EnvironmentName}-PUB1-SN"
+              - Fn::ImportValue: !Sub "${EnvironmentName}-PUB2-SN"
+              SecurityGroups:
+              - Ref: UdagramLBSecGroup
+        
+    UdagramWebAppTargetGroup:
+            Type: AWS::ElasticLoadBalancingV2::TargetGroup
+            Properties:
+              HealthCheckIntervalSeconds: 20
+              HealthCheckPath: /
+              HealthCheckProtocol: HTTP
+              HealthCheckTimeoutSeconds: 10
+              HealthyThresholdCount: 5
+              Port: 80
+              Protocol: HTTP
+              UnhealthyThresholdCount: 5
+              VpcId: 
+                Fn::ImportValue:
+                  Fn::Sub: "${EnvironmentName}-VPC"
+
+    UdagramListener:
+              Type: AWS::ElasticLoadBalancingV2::Listener
+              Properties:
+                DefaultActions:
+                - Type: forward
+                  TargetGroupArn:
+                    Ref: UdagramWebAppTargetGroup
+                LoadBalancerArn:
+                  Ref: UdagramWebAppLB
+                Port: '80'
+                Protocol: HTTP
+
+Outputs:
+    UdargamLoadBalancerUrl:
+        Description: Udagram load balancer url
+        Value: !Join ['',['http://', !GetAtt UdagramWebAppLB.DNSName ]]
+        Export:
+            Name: !Sub ${EnvironmentName}-LoadBalancer-URL
+    
+    ProfileWithRolesForOurApp:
+        Description: Udagram profile
+        Value: !Ref RootInstanceProfile
+        Export: 
+            Name: !Sub ${EnvironmentName}-UdagramInstanceProfile

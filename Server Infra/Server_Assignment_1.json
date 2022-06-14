@@ -1,0 +1,14 @@
+[
+	{
+		"ParameterKey": "EnvironmentName",
+		"ParameterValue": "Assignment02"
+	},
+    {
+        "ParameterKey": "MyInstanceType",
+        "ParameterValue": "t3.small"
+    },
+    {
+        "ParameterKey": "MyImageId",
+        "ParameterValue": "ami-09d56f8956ab235b3"
+    }
+]
